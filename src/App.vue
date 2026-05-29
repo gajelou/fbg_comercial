@@ -440,4 +440,160 @@ h2 {
     transform: translateY(-8px) rotate(-12deg);
   }
 }
+
+* {
+  box-sizing: border-box;
+}
+
+@media (max-width: 768px) {
+  .topbar {
+    padding: 14px 16px;
+  }
+
+  .brand {
+    max-width: 100%;
+    gap: 10px;
+  }
+
+  .logo-mark {
+    width: 48px;
+    height: 48px;
+    font-size: 16px;
+    flex-shrink: 0;
+  }
+
+  .brand h1 {
+    font-size: 18px;
+    line-height: 1.1;
+  }
+
+  .brand p {
+    font-size: 10px;
+    letter-spacing: 0.5px;
+  }
+
+  .hero {
+    margin: 24px auto;
+    padding: 0 14px;
+  }
+
+  .panel {
+    max-width: 100%;
+    padding: 22px 18px;
+    border-radius: 8px;
+  }
+
+  .tag {
+    font-size: 10px;
+    line-height: 1.3;
+  }
+
+  h2 {
+    font-size: 24px;
+    line-height: 1.1;
+  }
+
+  .description {
+    font-size: 14px;
+  }
+
+  .input-wrap input {
+    min-width: 0;
+    font-size: 20px;
+    padding: 13px;
+  }
+
+  .input-wrap span {
+    padding: 14px 16px;
+    font-size: 18px;
+  }
+
+  .primary,
+  .download {
+    font-size: 14px;
+    padding: 14px 12px;
+  }
+
+  .checkbox {
+    align-items: flex-start;
+    font-size: 14px;
+    line-height: 1.3;
+  }
+
+  .loading-box {
+    padding: 14px;
+  }
+
+  .tools-animation {
+    font-size: 26px;
+  }
+}
+
+@media (max-width: 420px) {
+  .brand {
+    align-items: flex-start;
+  }
+
+  .logo-mark {
+    width: 42px;
+    height: 42px;
+    font-size: 14px;
+  }
+
+  .brand h1 {
+    font-size: 16px;
+  }
+
+  .brand p {
+    font-size: 9px;
+  }
+
+  .hero {
+    margin: 18px auto;
+    padding: 0 10px;
+  }
+
+  .panel {
+    padding: 18px 14px;
+  }
+
+  h2 {
+    font-size: 21px;
+  }
+
+  .tag {
+    font-size: 9px;
+    padding: 6px 8px;
+  }
+
+  .description {
+    font-size: 13px;
+  }
+
+  .form-group label {
+    font-size: 12px;
+  }
+
+  .input-wrap input {
+    font-size: 18px;
+    padding: 12px;
+  }
+
+  .input-wrap span {
+    font-size: 17px;
+    padding: 13px 14px;
+  }
+
+  .primary,
+  .download {
+    font-size: 13px;
+    letter-spacing: 0.3px;
+  }
+
+  .success,
+  .error {
+    font-size: 13px;
+    padding: 10px;
+  }
+}
 </style>
