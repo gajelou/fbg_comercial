@@ -135,7 +135,7 @@ onMounted(carregarAgio);
             v-model="vendedorNome"
             class="text-input"
             type="text"
-            placeholder="Ex: Jair Camargo"
+            placeholder="Camarguinho"
           />
         </div>
 
@@ -150,12 +150,12 @@ onMounted(carregarAgio);
         </div>
 
         <div class="form-group">
-          <label>Instagram opcional</label>
+          <label>Email opcional</label>
           <input
             v-model="vendedorInstagram"
             class="text-input"
             type="text"
-            placeholder="Ex: @camargoebarros"
+            placeholder="Ex: camarguinho@camargoebarros.com"
           />
         </div>
 
