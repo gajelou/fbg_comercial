@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
 
-const API_URL = "https://county-common-latitude-system.trycloudflare.com";
+const API_URL = "https://scraperceb-production.up.railway.app";
 
 const agio = ref<number>(30);
 const mostrarPrecos = ref(true);
