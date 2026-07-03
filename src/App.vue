@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
 
-const API_URL = "http://srv1802060.hstgr.cloud:3000/";
+const API_URL = "https://srv1802060.hstgr.cloud";
 
 const agio = ref<number>(30);
 const mostrarPrecos = ref(true);
