@@ -115,7 +115,7 @@ onMounted(async () => {
         <div class="logo-mark">C&B</div>
 
         <div>
-          <h1>CAMARGO & BARROS</h1>
+          <h1>FBG</h1>
           <p>GERADOR DE CATÁLOGO ATACADO</p>
         </div>
       </div>
@@ -196,7 +196,7 @@ onMounted(async () => {
             v-model="vendedorNome"
             class="text-input"
             type="text"
-            placeholder="Camarguinho"
+            placeholder="José da Silva"
           />
         </div>
 
@@ -216,7 +216,7 @@ onMounted(async () => {
             v-model="vendedorInstagram"
             class="text-input"
             type="text"
-            placeholder="Ex: camarguinho@camargoebarros.com"
+            placeholder="Ex: zé@fbg.com"
           />
         </div>
 
