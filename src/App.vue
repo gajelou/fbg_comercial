@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
 
-const API_URL = "https://exports-cognitive-relation-concentration.trycloudflare.com ";
+const API_URL = "https://hold-attachments-indexed-filters.trycloudflare.com";
 
 const agio = ref<number>(30);
 const mostrarPrecos = ref(true);
