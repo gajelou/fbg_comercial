@@ -223,84 +223,106 @@ async function carregarProdutos(): Promise<void> {
   try {
     erro.value = "";
 
-    /*
-     * O frontend aceita três formatos:
-     *
-     * 1) Produtos completos:
-     * [
-     *   {
-     *     categoriaPrincipal: "CONTROLE-REMOTO",
-     *     categoria: "COMPATIVEL-AOC"
-     *   }
-     * ]
-     *
-     * 2) Categorias agrupadas:
-     * {
-     *   categorias: [
-     *     {
-     *       categoriaPrincipal: "CONTROLE-REMOTO",
-     *       categorias: ["COMPATIVEL-AOC"]
-     *     }
-     *   ]
-     * }
-     *
-     * 3) Backend antigo:
-     * {
-     *   categorias: [
-     *     "COMPATIVEL-AOC",
-     *     "COMPATIVEL-LG"
-     *   ]
-     * }
-     */
-
     const rotas = [
       `${API_URL}/produtos`,
       `${API_URL}/produtos.json`,
       `${API_URL}/produtos/categorias`
     ];
 
-    let carregou = false;
-    let ultimoErro = "Nenhuma rota retornou categorias válidas.";
+    /*
+     * Não para mais na primeira rota.
+     * Junta todas as categorias encontradas nas três respostas.
+     */
+    const agrupamento = new Map<string, Set<string>>();
+    let encontrouAlgumaCategoria = false;
+    const errosRotas: string[] = [];
+
+    function adicionarCategoria(
+      categoriaPrincipalRecebida?: string,
+      categoriaRecebida?: string
+    ): void {
+      const categoriaPrincipal = normalizarTexto(
+        categoriaPrincipalRecebida,
+        "CATEGORIAS"
+      );
+
+      const categoria = normalizarTexto(categoriaRecebida);
+
+      if (!categoria) {
+        return;
+      }
+
+      if (!agrupamento.has(categoriaPrincipal)) {
+        agrupamento.set(categoriaPrincipal, new Set<string>());
+      }
+
+      agrupamento.get(categoriaPrincipal)?.add(categoria);
+      encontrouAlgumaCategoria = true;
+    }
 
     for (const rota of rotas) {
       try {
-        const resposta = await fetch(`${rota}?t=${Date.now()}`, {
-          cache: "no-store"
-        });
+        const separador = rota.includes("?") ? "&" : "?";
+
+        const resposta = await fetch(
+          `${rota}${separador}t=${Date.now()}`,
+          {
+            cache: "no-store"
+          }
+        );
 
         if (!resposta.ok) {
-          ultimoErro = `${rota} retornou status ${resposta.status}.`;
+          errosRotas.push(`${rota}: status ${resposta.status}`);
           continue;
         }
 
         const dados = await lerJsonDaResposta(resposta);
 
         /*
-         * Primeiro tenta interpretar como lista de produtos completos.
+         * FORMATO 1:
+         * Array de produtos ou { produtos: [...] } / { data: [...] }
          */
         const listaProdutos = extrairProdutos(dados);
 
-        const produtosComCategoria = listaProdutos.filter(
-          (produto) =>
-            normalizarTexto(produto.categoriaPrincipal) ||
-            normalizarTexto(produto.categoria)
-        );
+        for (const produto of listaProdutos) {
+          const categoriaPrincipal = normalizarTexto(
+            produto.categoriaPrincipal
+          );
 
-        if (produtosComCategoria.length) {
-          produtos.value = produtosComCategoria;
-          gruposCategorias.value =
-            montarGruposCategorias(produtosComCategoria);
+          const categoria = normalizarTexto(produto.categoria);
 
-          selecionarTodasCategorias();
-          carregou = gruposCategorias.value.length > 0;
+          /*
+           * Se tiver os dois campos, agrupa normalmente.
+           */
+          if (categoriaPrincipal && categoria) {
+            adicionarCategoria(categoriaPrincipal, categoria);
+            continue;
+          }
 
-          if (carregou) {
-            break;
+          /*
+           * Se tiver apenas categoriaPrincipal, ela também aparece
+           * como opção selecionável.
+           */
+          if (categoriaPrincipal && !categoria) {
+            adicionarCategoria(
+              "CATEGORIAS-PRINCIPAIS",
+              categoriaPrincipal
+            );
+            continue;
+          }
+
+          /*
+           * Se tiver apenas categoria, mantém compatibilidade
+           * com o JSON antigo.
+           */
+          if (!categoriaPrincipal && categoria) {
+            adicionarCategoria("CATEGORIAS", categoria);
           }
         }
 
         /*
-         * Depois tenta interpretar a propriedade "categorias".
+         * FORMATO 2:
+         * { categorias: [...] }
          */
         if (
           dados &&
@@ -312,121 +334,180 @@ async function carregarProdutos(): Promise<void> {
           ).categorias;
 
           if (Array.isArray(categoriasRecebidas)) {
-            /*
-             * Formato novo agrupado:
-             * [{ categoriaPrincipal, categorias: [] }]
-             */
-            const gruposRecebidos = categoriasRecebidas
-              .filter(
-                (item) =>
-                  item &&
-                  typeof item === "object" &&
-                  "categoriaPrincipal" in item
-              )
-              .map((item) => {
-                const grupo = item as {
-                  categoriaPrincipal?: unknown;
-                  categorias?: unknown;
-                  categoria?: unknown;
-                };
+            for (const item of categoriasRecebidas) {
+              /*
+               * Backend antigo:
+               * categorias: ["A", "B", "C"]
+               */
+              if (typeof item === "string") {
+                adicionarCategoria("CATEGORIAS", item);
+                continue;
+              }
 
-                const categoriaPrincipal = normalizarTexto(
-                  typeof grupo.categoriaPrincipal === "string"
-                    ? grupo.categoriaPrincipal
-                    : undefined,
-                  "SEM-CATEGORIA-PRINCIPAL"
+              if (!item || typeof item !== "object") {
+                continue;
+              }
+
+              const objeto = item as {
+                categoriaPrincipal?: unknown;
+                categoria?: unknown;
+                categorias?: unknown;
+                subcategorias?: unknown;
+              };
+
+              const categoriaPrincipal =
+                typeof objeto.categoriaPrincipal === "string"
+                  ? objeto.categoriaPrincipal
+                  : "";
+
+              /*
+               * Formato:
+               * { categoriaPrincipal, categoria }
+               */
+              if (typeof objeto.categoria === "string") {
+                adicionarCategoria(
+                  categoriaPrincipal || "CATEGORIAS",
+                  objeto.categoria
                 );
+              }
 
-                let categorias: string[] = [];
-
-                if (Array.isArray(grupo.categorias)) {
-                  categorias = grupo.categorias
-                    .filter(
-                      (categoria): categoria is string =>
-                        typeof categoria === "string"
-                    )
-                    .map((categoria) => categoria.trim())
-                    .filter(Boolean);
-                } else if (typeof grupo.categoria === "string") {
-                  const categoria = grupo.categoria.trim();
-
-                  if (categoria) {
-                    categorias = [categoria];
+              /*
+               * Formato:
+               * { categoriaPrincipal, categorias: [] }
+               */
+              if (Array.isArray(objeto.categorias)) {
+                for (const categoria of objeto.categorias) {
+                  if (typeof categoria === "string") {
+                    adicionarCategoria(
+                      categoriaPrincipal || "CATEGORIAS",
+                      categoria
+                    );
                   }
                 }
+              }
 
-                return {
-                  categoriaPrincipal,
-                  categorias
-                };
-              })
-              .filter((grupo) => grupo.categorias.length > 0);
-
-            if (gruposRecebidos.length) {
-              gruposCategorias.value = gruposRecebidos
-                .map((grupo) => ({
-                  categoriaPrincipal: grupo.categoriaPrincipal,
-                  categorias: Array.from(
-                    new Set(grupo.categorias)
-                  ).sort((a, b) =>
-                    a.localeCompare(b, "pt-BR")
-                  )
-                }))
-                .sort((a, b) =>
-                  a.categoriaPrincipal.localeCompare(
-                    b.categoriaPrincipal,
-                    "pt-BR"
-                  )
-                );
-
-              produtos.value = [];
-              selecionarTodasCategorias();
-              carregou = true;
-              break;
-            }
-
-            /*
-             * Formato antigo:
-             * ["CATEGORIA-1", "CATEGORIA-2"]
-             */
-            const categoriasSimples = categoriasRecebidas
-              .filter(
-                (categoria): categoria is string =>
-                  typeof categoria === "string"
-              )
-              .map((categoria) => categoria.trim())
-              .filter(Boolean);
-
-            if (categoriasSimples.length) {
-              gruposCategorias.value = [
-                {
-                  categoriaPrincipal: "CATEGORIAS",
-                  categorias: Array.from(
-                    new Set(categoriasSimples)
-                  ).sort((a, b) =>
-                    a.localeCompare(b, "pt-BR")
-                  )
+              /*
+               * Também aceita:
+               * { categoriaPrincipal, subcategorias: [] }
+               */
+              if (Array.isArray(objeto.subcategorias)) {
+                for (const categoria of objeto.subcategorias) {
+                  if (typeof categoria === "string") {
+                    adicionarCategoria(
+                      categoriaPrincipal || "CATEGORIAS",
+                      categoria
+                    );
+                  }
                 }
-              ];
+              }
 
-              produtos.value = [];
-              selecionarTodasCategorias();
-              carregou = true;
-              break;
+              /*
+               * Se vier apenas categoriaPrincipal, sem subcategorias,
+               * ela ainda aparece como opção.
+               */
+              const semCategorias =
+                !Array.isArray(objeto.categorias) ||
+                objeto.categorias.length === 0;
+
+              const semSubcategorias =
+                !Array.isArray(objeto.subcategorias) ||
+                objeto.subcategorias.length === 0;
+
+              const semCategoria =
+                typeof objeto.categoria !== "string" ||
+                !objeto.categoria.trim();
+
+              if (
+                categoriaPrincipal &&
+                semCategorias &&
+                semSubcategorias &&
+                semCategoria
+              ) {
+                adicionarCategoria(
+                  "CATEGORIAS-PRINCIPAIS",
+                  categoriaPrincipal
+                );
+              }
+            }
+          }
+        }
+
+        /*
+         * FORMATO 3:
+         * { categoriasPrincipais: [...] }
+         */
+        if (
+          dados &&
+          typeof dados === "object" &&
+          "categoriasPrincipais" in dados
+        ) {
+          const principais = (
+            dados as { categoriasPrincipais?: unknown }
+          ).categoriasPrincipais;
+
+          if (Array.isArray(principais)) {
+            for (const categoriaPrincipal of principais) {
+              if (typeof categoriaPrincipal === "string") {
+                adicionarCategoria(
+                  "CATEGORIAS-PRINCIPAIS",
+                  categoriaPrincipal
+                );
+              }
             }
           }
         }
       } catch (e) {
-        ultimoErro =
-          e instanceof Error
-            ? e.message
-            : "Erro ao carregar categorias.";
+        errosRotas.push(
+          `${rota}: ${
+            e instanceof Error ? e.message : "erro desconhecido"
+          }`
+        );
       }
     }
 
-    if (!carregou) {
-      throw new Error(ultimoErro);
+    if (!encontrouAlgumaCategoria) {
+      throw new Error(
+        errosRotas.length
+          ? `Nenhuma categoria encontrada. ${errosRotas.join(" | ")}`
+          : "Nenhuma categoria encontrada."
+      );
     }
+
+    gruposCategorias.value = Array.from(agrupamento.entries())
+      .map(([categoriaPrincipal, categorias]) => ({
+        categoriaPrincipal,
+        categorias: Array.from(categorias).sort((a, b) =>
+          a.localeCompare(b, "pt-BR", {
+            sensitivity: "base"
+          })
+        )
+      }))
+      .filter((grupo) => grupo.categorias.length > 0)
+      .sort((a, b) =>
+        a.categoriaPrincipal.localeCompare(
+          b.categoriaPrincipal,
+          "pt-BR",
+          {
+            sensitivity: "base"
+          }
+        )
+      );
+
+    produtos.value = [];
+    selecionarTodasCategorias();
+
+    console.log(
+      "Total de opções no seletor:",
+      gruposCategorias.value.reduce(
+        (total, grupo) => total + grupo.categorias.length,
+        0
+      )
+    );
+
+    console.log(
+      "Categorias carregadas:",
+      gruposCategorias.value
+    );
   } catch (e) {
     produtos.value = [];
     gruposCategorias.value = [];
@@ -937,9 +1018,7 @@ h2 {
   display: flex;
   flex-direction: column;
   gap: 14px;
-  max-height: 500px;
-  overflow-y: auto;
-  padding: 2px 5px 2px 2px;
+  padding: 2px;
 }
 
 .category-group {
