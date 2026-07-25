@@ -225,52 +225,63 @@ async function carregarProdutos(): Promise<void> {
   try {
     erro.value = "";
 
-    const rotas = [`${API_URL}/produtos`, `${API_URL}/produtos.json`];
-    let listaProdutos: Produto[] = [];
-    let ultimoErro = "Erro ao carregar os produtos.";
-
-    for (const rota of rotas) {
-      try {
-        const resposta = await fetch(rota);
-
-        if (!resposta.ok) {
-          ultimoErro = `A rota ${rota} retornou o status ${resposta.status}.`;
-          continue;
-        }
-
-        const dados = await lerJsonDaResposta(resposta);
-        listaProdutos = extrairProdutos(dados);
-
-        if (listaProdutos.length > 0) {
-          break;
-        }
-
-        ultimoErro = `A rota ${rota} não retornou uma lista de produtos.`;
-      } catch (e) {
-        ultimoErro =
-          e instanceof Error ? e.message : "Erro ao acessar os produtos.";
+    // Usa diretamente o arquivo completo gerado pelo scraper.
+    const resposta = await fetch(
+      `${API_URL}/produtos.json?timestamp=${Date.now()}`,
+      {
+        cache: "no-store"
       }
+    );
+
+    if (!resposta.ok) {
+      throw new Error(
+        `Erro ao carregar produtos. Status: ${resposta.status}`
+      );
     }
 
+    const dados = await lerJsonDaResposta(resposta);
+    const listaProdutos = extrairProdutos(dados);
+
     if (!listaProdutos.length) {
-      throw new Error(ultimoErro);
+      throw new Error(
+        "O arquivo produtos.json não contém produtos."
+      );
     }
 
     produtos.value = listaProdutos;
-    gruposCategorias.value = montarGruposCategorias(listaProdutos);
+
+    gruposCategorias.value =
+      montarGruposCategorias(listaProdutos);
+
     selecionarTodasCategorias();
+
+    console.log(
+      "Produtos carregados:",
+      listaProdutos.length
+    );
+
+    console.log(
+      "Categorias principais:",
+      gruposCategorias.value.length
+    );
+
+    console.log(
+      "Grupos de categorias:",
+      gruposCategorias.value
+    );
   } catch (e) {
     produtos.value = [];
     gruposCategorias.value = [];
     limparCategorias();
 
     erro.value =
-      e instanceof Error ? e.message : "Erro ao carregar categorias.";
+      e instanceof Error
+        ? e.message
+        : "Erro ao carregar categorias.";
   } finally {
     carregandoCategorias.value = false;
   }
 }
-
 async function gerarCatalogo(): Promise<void> {
   carregando.value = true;
   mensagem.value = "";
