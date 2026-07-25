@@ -1,6 +1,4 @@
-from pathlib import Path
-
-src = r'''<script setup lang="ts">
+<script setup lang="ts">
 import { onMounted, ref } from "vue";
 
 const API_URL = "https://environment-companies-phi-finance.trycloudflare.com";
@@ -74,9 +72,7 @@ function extrairProdutos(dados: unknown): Produto[] {
   return [];
 }
 
-function montarGruposCategorias(
-  listaProdutos: Produto[]
-): GrupoCategoria[] {
+function montarGruposCategorias(listaProdutos: Produto[]): GrupoCategoria[] {
   const agrupamento = new Map<string, Set<string>>();
 
   for (const produto of listaProdutos) {
@@ -91,35 +87,21 @@ function montarGruposCategorias(
     );
 
     if (!agrupamento.has(categoriaPrincipal)) {
-      agrupamento.set(
-        categoriaPrincipal,
-        new Set<string>()
-      );
+      agrupamento.set(categoriaPrincipal, new Set<string>());
     }
 
-    agrupamento
-      .get(categoriaPrincipal)!
-      .add(categoria);
+    agrupamento.get(categoriaPrincipal)?.add(categoria);
   }
 
   return Array.from(agrupamento.entries())
     .map(([categoriaPrincipal, categorias]) => ({
       categoriaPrincipal,
-      categorias: Array.from(categorias).sort(
-        (a, b) =>
-          a.localeCompare(b, "pt-BR", {
-            sensitivity: "base"
-          })
+      categorias: Array.from(categorias).sort((a, b) =>
+        a.localeCompare(b, "pt-BR")
       )
     }))
     .sort((a, b) =>
-      a.categoriaPrincipal.localeCompare(
-        b.categoriaPrincipal,
-        "pt-BR",
-        {
-          sensitivity: "base"
-        }
-      )
+      a.categoriaPrincipal.localeCompare(b.categoriaPrincipal, "pt-BR")
     );
 }
 
@@ -241,63 +223,110 @@ async function carregarProdutos(): Promise<void> {
   try {
     erro.value = "";
 
-    // Usa diretamente o arquivo completo gerado pelo scraper.
-    const resposta = await fetch(
-      `${API_URL}/produtos.json?timestamp=${Date.now()}`,
+    /*
+     * Compatibilidade com o backend antigo:
+     * 1) tenta carregar produtos completos;
+     * 2) se não existir, usa /produtos/categorias;
+     * 3) nunca deixa o seletor vazio apenas porque uma rota nova não existe.
+     */
+    const rotasProdutos = [
+      `${API_URL}/produtos`,
+      `${API_URL}/produtos.json`
+    ];
+
+    let listaProdutos: Produto[] = [];
+
+    for (const rota of rotasProdutos) {
+      try {
+        const resposta = await fetch(`${rota}?t=${Date.now()}`, {
+          cache: "no-store"
+        });
+
+        if (!resposta.ok) {
+          continue;
+        }
+
+        const dados = await lerJsonDaResposta(resposta);
+        const produtosEncontrados = extrairProdutos(dados);
+
+        if (produtosEncontrados.length) {
+          listaProdutos = produtosEncontrados;
+          break;
+        }
+      } catch {
+        // Continua para a próxima rota.
+      }
+    }
+
+    if (listaProdutos.length) {
+      produtos.value = listaProdutos;
+      gruposCategorias.value = montarGruposCategorias(listaProdutos);
+      selecionarTodasCategorias();
+      return;
+    }
+
+    // Fallback obrigatório para o backend antigo.
+    const respostaCategorias = await fetch(
+      `${API_URL}/produtos/categorias?t=${Date.now()}`,
       {
         cache: "no-store"
       }
     );
 
-    if (!resposta.ok) {
+    if (!respostaCategorias.ok) {
       throw new Error(
-        `Erro ao carregar produtos. Status: ${resposta.status}`
+        `Erro ao carregar categorias. Status: ${respostaCategorias.status}`
       );
     }
 
-    const dados = await lerJsonDaResposta(resposta);
-    const listaProdutos = extrairProdutos(dados);
+    const dadosCategorias = (await lerJsonDaResposta(
+      respostaCategorias
+    )) as {
+      categorias?: unknown;
+    };
 
-    if (!listaProdutos.length) {
+    const categoriasAntigas = Array.isArray(dadosCategorias.categorias)
+      ? dadosCategorias.categorias
+          .filter((categoria): categoria is string =>
+            typeof categoria === "string"
+          )
+          .map((categoria) => categoria.trim())
+          .filter(Boolean)
+      : [];
+
+    if (!categoriasAntigas.length) {
       throw new Error(
-        "O arquivo produtos.json não contém produtos."
+        "O backend não retornou produtos nem categorias."
       );
     }
 
-    produtos.value = listaProdutos;
+    /*
+     * O endpoint antigo só fornece uma lista plana.
+     * Para não quebrar o seletor, exibimos todas em um grupo compatível.
+     */
+    gruposCategorias.value = [
+      {
+        categoriaPrincipal: "TODAS-AS-CATEGORIAS",
+        categorias: Array.from(new Set(categoriasAntigas)).sort((a, b) =>
+          a.localeCompare(b, "pt-BR")
+        )
+      }
+    ];
 
-    gruposCategorias.value =
-      montarGruposCategorias(listaProdutos);
-
+    produtos.value = [];
     selecionarTodasCategorias();
-
-    console.log(
-      "Produtos carregados:",
-      listaProdutos.length
-    );
-
-    console.log(
-      "Categorias principais:",
-      gruposCategorias.value.length
-    );
-
-    console.log(
-      "Grupos de categorias:",
-      gruposCategorias.value
-    );
   } catch (e) {
     produtos.value = [];
     gruposCategorias.value = [];
     limparCategorias();
 
     erro.value =
-      e instanceof Error
-        ? e.message
-        : "Erro ao carregar categorias.";
+      e instanceof Error ? e.message : "Erro ao carregar categorias.";
   } finally {
     carregandoCategorias.value = false;
   }
 }
+
 async function gerarCatalogo(): Promise<void> {
   carregando.value = true;
   mensagem.value = "";
@@ -1210,8 +1239,3 @@ h2 {
   }
 }
 </style>
-'''
-
-out = Path("/mnt/data/App.vue")
-out.write_text(src, encoding="utf-8")
-print(out)
