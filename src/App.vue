@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 
-const API_URL = "https://environment-companies-phi-finance.trycloudflare.com"
+const API_URL = "https://environment-companies-phi-finance.trycloudflare.com";
 
 type Produto = {
   codigo?: string;
@@ -224,218 +224,104 @@ async function carregarProdutos(): Promise<void> {
     erro.value = "";
 
     /*
-     * O frontend aceita três formatos:
-     *
-     * 1) Produtos completos:
-     * [
-     *   {
-     *     categoriaPrincipal: "CONTROLE-REMOTO",
-     *     categoria: "COMPATIVEL-AOC"
-     *   }
-     * ]
-     *
-     * 2) Categorias agrupadas:
-     * {
-     *   categorias: [
-     *     {
-     *       categoriaPrincipal: "CONTROLE-REMOTO",
-     *       categorias: ["COMPATIVEL-AOC"]
-     *     }
-     *   ]
-     * }
-     *
-     * 3) Backend antigo:
-     * {
-     *   categorias: [
-     *     "COMPATIVEL-AOC",
-     *     "COMPATIVEL-LG"
-     *   ]
-     * }
+     * Compatibilidade com o backend antigo:
+     * 1) tenta carregar produtos completos;
+     * 2) se não existir, usa /produtos/categorias;
+     * 3) nunca deixa o seletor vazio apenas porque uma rota nova não existe.
      */
-
-    const rotas = [
+    const rotasProdutos = [
       `${API_URL}/produtos`,
-      `${API_URL}/produtos.json`,
-      `${API_URL}/produtos/categorias`
+      `${API_URL}/produtos.json`
     ];
 
-    let carregou = false;
-    let ultimoErro = "Nenhuma rota retornou categorias válidas.";
+    let listaProdutos: Produto[] = [];
 
-    for (const rota of rotas) {
+    for (const rota of rotasProdutos) {
       try {
         const resposta = await fetch(`${rota}?t=${Date.now()}`, {
           cache: "no-store"
         });
 
         if (!resposta.ok) {
-          ultimoErro = `${rota} retornou status ${resposta.status}.`;
           continue;
         }
 
         const dados = await lerJsonDaResposta(resposta);
+        const produtosEncontrados = extrairProdutos(dados);
 
-        /*
-         * Primeiro tenta interpretar como lista de produtos completos.
-         */
-        const listaProdutos = extrairProdutos(dados);
-
-        const produtosComCategoria = listaProdutos.filter(
-          (produto) =>
-            normalizarTexto(produto.categoriaPrincipal) ||
-            normalizarTexto(produto.categoria)
-        );
-
-        if (produtosComCategoria.length) {
-          produtos.value = produtosComCategoria;
-          gruposCategorias.value =
-            montarGruposCategorias(produtosComCategoria);
-
-          selecionarTodasCategorias();
-          carregou = gruposCategorias.value.length > 0;
-
-          if (carregou) {
-            break;
-          }
+        if (produtosEncontrados.length) {
+          listaProdutos = produtosEncontrados;
+          break;
         }
-
-        /*
-         * Depois tenta interpretar a propriedade "categorias".
-         */
-        if (
-          dados &&
-          typeof dados === "object" &&
-          "categorias" in dados
-        ) {
-          const categoriasRecebidas = (
-            dados as { categorias?: unknown }
-          ).categorias;
-
-          if (Array.isArray(categoriasRecebidas)) {
-            /*
-             * Formato novo agrupado:
-             * [{ categoriaPrincipal, categorias: [] }]
-             */
-            const gruposRecebidos = categoriasRecebidas
-              .filter(
-                (item) =>
-                  item &&
-                  typeof item === "object" &&
-                  "categoriaPrincipal" in item
-              )
-              .map((item) => {
-                const grupo = item as {
-                  categoriaPrincipal?: unknown;
-                  categorias?: unknown;
-                  categoria?: unknown;
-                };
-
-                const categoriaPrincipal = normalizarTexto(
-                  typeof grupo.categoriaPrincipal === "string"
-                    ? grupo.categoriaPrincipal
-                    : undefined,
-                  "SEM-CATEGORIA-PRINCIPAL"
-                );
-
-                let categorias: string[] = [];
-
-                if (Array.isArray(grupo.categorias)) {
-                  categorias = grupo.categorias
-                    .filter(
-                      (categoria): categoria is string =>
-                        typeof categoria === "string"
-                    )
-                    .map((categoria) => categoria.trim())
-                    .filter(Boolean);
-                } else if (typeof grupo.categoria === "string") {
-                  const categoria = grupo.categoria.trim();
-
-                  if (categoria) {
-                    categorias = [categoria];
-                  }
-                }
-
-                return {
-                  categoriaPrincipal,
-                  categorias
-                };
-              })
-              .filter((grupo) => grupo.categorias.length > 0);
-
-            if (gruposRecebidos.length) {
-              gruposCategorias.value = gruposRecebidos
-                .map((grupo) => ({
-                  categoriaPrincipal: grupo.categoriaPrincipal,
-                  categorias: Array.from(
-                    new Set(grupo.categorias)
-                  ).sort((a, b) =>
-                    a.localeCompare(b, "pt-BR")
-                  )
-                }))
-                .sort((a, b) =>
-                  a.categoriaPrincipal.localeCompare(
-                    b.categoriaPrincipal,
-                    "pt-BR"
-                  )
-                );
-
-              produtos.value = [];
-              selecionarTodasCategorias();
-              carregou = true;
-              break;
-            }
-
-            /*
-             * Formato antigo:
-             * ["CATEGORIA-1", "CATEGORIA-2"]
-             */
-            const categoriasSimples = categoriasRecebidas
-              .filter(
-                (categoria): categoria is string =>
-                  typeof categoria === "string"
-              )
-              .map((categoria) => categoria.trim())
-              .filter(Boolean);
-
-            if (categoriasSimples.length) {
-              gruposCategorias.value = [
-                {
-                  categoriaPrincipal: "CATEGORIAS",
-                  categorias: Array.from(
-                    new Set(categoriasSimples)
-                  ).sort((a, b) =>
-                    a.localeCompare(b, "pt-BR")
-                  )
-                }
-              ];
-
-              produtos.value = [];
-              selecionarTodasCategorias();
-              carregou = true;
-              break;
-            }
-          }
-        }
-      } catch (e) {
-        ultimoErro =
-          e instanceof Error
-            ? e.message
-            : "Erro ao carregar categorias.";
+      } catch {
+        // Continua para a próxima rota.
       }
     }
 
-    if (!carregou) {
-      throw new Error(ultimoErro);
+    if (listaProdutos.length) {
+      produtos.value = listaProdutos;
+      gruposCategorias.value = montarGruposCategorias(listaProdutos);
+      selecionarTodasCategorias();
+      return;
     }
+
+    // Fallback obrigatório para o backend antigo.
+    const respostaCategorias = await fetch(
+      `${API_URL}/produtos/categorias?t=${Date.now()}`,
+      {
+        cache: "no-store"
+      }
+    );
+
+    if (!respostaCategorias.ok) {
+      throw new Error(
+        `Erro ao carregar categorias. Status: ${respostaCategorias.status}`
+      );
+    }
+
+    const dadosCategorias = (await lerJsonDaResposta(
+      respostaCategorias
+    )) as {
+      categorias?: unknown;
+    };
+
+    const categoriasAntigas = Array.isArray(dadosCategorias.categorias)
+      ? dadosCategorias.categorias
+          .filter((categoria): categoria is string =>
+            typeof categoria === "string"
+          )
+          .map((categoria) => categoria.trim())
+          .filter(Boolean)
+      : [];
+
+    if (!categoriasAntigas.length) {
+      throw new Error(
+        "O backend não retornou produtos nem categorias."
+      );
+    }
+
+    /*
+     * O endpoint antigo só fornece uma lista plana.
+     * Para não quebrar o seletor, exibimos todas em um grupo compatível.
+     */
+    gruposCategorias.value = [
+      {
+        categoriaPrincipal: "TODAS-AS-CATEGORIAS",
+        categorias: Array.from(new Set(categoriasAntigas)).sort((a, b) =>
+          a.localeCompare(b, "pt-BR")
+        )
+      }
+    ];
+
+    produtos.value = [];
+    selecionarTodasCategorias();
   } catch (e) {
     produtos.value = [];
     gruposCategorias.value = [];
     limparCategorias();
 
     erro.value =
-      e instanceof Error
-        ? e.message
-        : "Erro ao carregar categorias.";
+      e instanceof Error ? e.message : "Erro ao carregar categorias.";
   } finally {
     carregandoCategorias.value = false;
   }
