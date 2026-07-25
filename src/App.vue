@@ -74,7 +74,9 @@ function extrairProdutos(dados: unknown): Produto[] {
   return [];
 }
 
-function montarGruposCategorias(listaProdutos: Produto[]): GrupoCategoria[] {
+function montarGruposCategorias(
+  listaProdutos: Produto[]
+): GrupoCategoria[] {
   const agrupamento = new Map<string, Set<string>>();
 
   for (const produto of listaProdutos) {
@@ -89,21 +91,35 @@ function montarGruposCategorias(listaProdutos: Produto[]): GrupoCategoria[] {
     );
 
     if (!agrupamento.has(categoriaPrincipal)) {
-      agrupamento.set(categoriaPrincipal, new Set<string>());
+      agrupamento.set(
+        categoriaPrincipal,
+        new Set<string>()
+      );
     }
 
-    agrupamento.get(categoriaPrincipal)?.add(categoria);
+    agrupamento
+      .get(categoriaPrincipal)!
+      .add(categoria);
   }
 
   return Array.from(agrupamento.entries())
     .map(([categoriaPrincipal, categorias]) => ({
       categoriaPrincipal,
-      categorias: Array.from(categorias).sort((a, b) =>
-        a.localeCompare(b, "pt-BR")
+      categorias: Array.from(categorias).sort(
+        (a, b) =>
+          a.localeCompare(b, "pt-BR", {
+            sensitivity: "base"
+          })
       )
     }))
     .sort((a, b) =>
-      a.categoriaPrincipal.localeCompare(b.categoriaPrincipal, "pt-BR")
+      a.categoriaPrincipal.localeCompare(
+        b.categoriaPrincipal,
+        "pt-BR",
+        {
+          sensitivity: "base"
+        }
+      )
     );
 }
 
