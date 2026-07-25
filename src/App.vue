@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 
-const API_URL = "https://environment-companies-phi-finance.trycloudflare.com";
+const API_URL = "https://environment-companies-phi-finance.trycloudflare.com"
 
 type Produto = {
   codigo?: string;
