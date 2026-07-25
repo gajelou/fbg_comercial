@@ -1,7 +1,24 @@
-<script setup lang="ts">
-import { ref, onMounted } from "vue";
+from pathlib import Path
+
+src = r'''<script setup lang="ts">
+import { onMounted, ref } from "vue";
 
 const API_URL = "https://environment-companies-phi-finance.trycloudflare.com";
+
+type Produto = {
+  codigo?: string;
+  nome?: string;
+  preco?: string;
+  imagem?: string;
+  link?: string;
+  categoriaPrincipal?: string;
+  categoria?: string;
+};
+
+type GrupoCategoria = {
+  categoriaPrincipal: string;
+  categorias: string[];
+};
 
 const agio = ref<number>(30);
 const mostrarPrecos = ref(true);
@@ -10,52 +27,265 @@ const vendedorNome = ref("");
 const vendedorContato = ref("");
 const vendedorInstagram = ref("");
 
-const categorias = ref<string[]>([]);
+const produtos = ref<Produto[]>([]);
+const gruposCategorias = ref<GrupoCategoria[]>([]);
+const categoriasPrincipaisSelecionadas = ref<string[]>([]);
 const categoriasSelecionadas = ref<string[]>([]);
 
+const carregandoCategorias = ref(false);
 const carregando = ref(false);
 const mensagem = ref("");
 const erro = ref("");
 const downloadUrl = ref("");
 
-async function carregarAgio() {
-  try {
-    const resposta = await fetch(`${API_URL}/agio`);
-    const dados = await resposta.json();
+function normalizarTexto(valor?: string, fallback = ""): string {
+  const texto = String(valor ?? "").trim();
+  return texto || fallback;
+}
 
-    agio.value = dados.agioPercentual;
-  } catch {
-    erro.value = "Erro ao carregar ágio atual.";
+function formatarCategoria(valor: string): string {
+  return valor
+    .replace(/[-_]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function chaveCategoria(categoriaPrincipal: string, categoria: string): string {
+  return `${categoriaPrincipal}|||${categoria}`;
+}
+
+function extrairProdutos(dados: unknown): Produto[] {
+  if (Array.isArray(dados)) {
+    return dados as Produto[];
   }
-}
 
-async function carregarCategorias() {
-  try {
-    const resposta = await fetch(`${API_URL}/produtos/categorias`);
-    const dados = await resposta.json();
+  if (dados && typeof dados === "object") {
+    const objeto = dados as Record<string, unknown>;
 
-    categorias.value = dados.categorias || [];
-    categoriasSelecionadas.value = [...categorias.value];
-  } catch {
-    erro.value = "Erro ao carregar categorias.";
+    if (Array.isArray(objeto.produtos)) {
+      return objeto.produtos as Produto[];
+    }
+
+    if (Array.isArray(objeto.data)) {
+      return objeto.data as Produto[];
+    }
   }
+
+  return [];
 }
 
-function selecionarTodasCategorias() {
-  categoriasSelecionadas.value = [...categorias.value];
+function montarGruposCategorias(listaProdutos: Produto[]): GrupoCategoria[] {
+  const agrupamento = new Map<string, Set<string>>();
+
+  for (const produto of listaProdutos) {
+    const categoriaPrincipal = normalizarTexto(
+      produto.categoriaPrincipal,
+      "SEM-CATEGORIA-PRINCIPAL"
+    );
+
+    const categoria = normalizarTexto(
+      produto.categoria,
+      "SEM-CATEGORIA"
+    );
+
+    if (!agrupamento.has(categoriaPrincipal)) {
+      agrupamento.set(categoriaPrincipal, new Set<string>());
+    }
+
+    agrupamento.get(categoriaPrincipal)?.add(categoria);
+  }
+
+  return Array.from(agrupamento.entries())
+    .map(([categoriaPrincipal, categorias]) => ({
+      categoriaPrincipal,
+      categorias: Array.from(categorias).sort((a, b) =>
+        a.localeCompare(b, "pt-BR")
+      )
+    }))
+    .sort((a, b) =>
+      a.categoriaPrincipal.localeCompare(b.categoriaPrincipal, "pt-BR")
+    );
 }
 
-function limparCategorias() {
+function categoriasDoGrupo(grupo: GrupoCategoria): string[] {
+  return grupo.categorias.map((categoria) =>
+    chaveCategoria(grupo.categoriaPrincipal, categoria)
+  );
+}
+
+function grupoTotalmenteSelecionado(grupo: GrupoCategoria): boolean {
+  const chaves = categoriasDoGrupo(grupo);
+
+  return (
+    chaves.length > 0 &&
+    chaves.every((chave) => categoriasSelecionadas.value.includes(chave))
+  );
+}
+
+function grupoParcialmenteSelecionado(grupo: GrupoCategoria): boolean {
+  const chaves = categoriasDoGrupo(grupo);
+  const quantidadeSelecionada = chaves.filter((chave) =>
+    categoriasSelecionadas.value.includes(chave)
+  ).length;
+
+  return quantidadeSelecionada > 0 && quantidadeSelecionada < chaves.length;
+}
+
+function atualizarCategoriasPrincipaisSelecionadas(): void {
+  categoriasPrincipaisSelecionadas.value = gruposCategorias.value
+    .filter((grupo) => grupoTotalmenteSelecionado(grupo))
+    .map((grupo) => grupo.categoriaPrincipal);
+}
+
+function alternarCategoriaPrincipal(
+  grupo: GrupoCategoria,
+  selecionada: boolean
+): void {
+  const chavesDoGrupo = categoriasDoGrupo(grupo);
+
+  if (selecionada) {
+    categoriasSelecionadas.value = Array.from(
+      new Set([...categoriasSelecionadas.value, ...chavesDoGrupo])
+    );
+  } else {
+    categoriasSelecionadas.value = categoriasSelecionadas.value.filter(
+      (chave) => !chavesDoGrupo.includes(chave)
+    );
+  }
+
+  atualizarCategoriasPrincipaisSelecionadas();
+}
+
+function atualizarSubcategoria(): void {
+  atualizarCategoriasPrincipaisSelecionadas();
+}
+
+function selecionarTodasCategorias(): void {
+  categoriasSelecionadas.value = gruposCategorias.value.flatMap((grupo) =>
+    categoriasDoGrupo(grupo)
+  );
+
+  atualizarCategoriasPrincipaisSelecionadas();
+}
+
+function limparCategorias(): void {
+  categoriasPrincipaisSelecionadas.value = [];
   categoriasSelecionadas.value = [];
 }
 
-async function gerarCatalogo() {
+function obterCategoriasSelecionadasParaEnvio(): string[] {
+  return Array.from(
+    new Set(
+      categoriasSelecionadas.value.map((chave) => {
+        const separador = chave.indexOf("|||");
+        return separador >= 0 ? chave.slice(separador + 3) : chave;
+      })
+    )
+  );
+}
+
+async function lerJsonDaResposta(resposta: Response): Promise<unknown> {
+  const texto = await resposta.text();
+
+  if (!texto) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(texto);
+  } catch {
+    throw new Error("A API retornou uma resposta inválida.");
+  }
+}
+
+async function carregarAgio(): Promise<void> {
+  try {
+    const resposta = await fetch(`${API_URL}/agio`);
+
+    if (!resposta.ok) {
+      throw new Error("Erro ao carregar ágio atual.");
+    }
+
+    const dados = (await lerJsonDaResposta(resposta)) as {
+      agioPercentual?: number;
+    };
+
+    if (typeof dados.agioPercentual === "number") {
+      agio.value = dados.agioPercentual;
+    }
+  } catch (e) {
+    erro.value =
+      e instanceof Error ? e.message : "Erro ao carregar ágio atual.";
+  }
+}
+
+async function carregarProdutos(): Promise<void> {
+  carregandoCategorias.value = true;
+
+  try {
+    erro.value = "";
+
+    const rotas = [`${API_URL}/produtos`, `${API_URL}/produtos.json`];
+    let listaProdutos: Produto[] = [];
+    let ultimoErro = "Erro ao carregar os produtos.";
+
+    for (const rota of rotas) {
+      try {
+        const resposta = await fetch(rota);
+
+        if (!resposta.ok) {
+          ultimoErro = `A rota ${rota} retornou o status ${resposta.status}.`;
+          continue;
+        }
+
+        const dados = await lerJsonDaResposta(resposta);
+        listaProdutos = extrairProdutos(dados);
+
+        if (listaProdutos.length > 0) {
+          break;
+        }
+
+        ultimoErro = `A rota ${rota} não retornou uma lista de produtos.`;
+      } catch (e) {
+        ultimoErro =
+          e instanceof Error ? e.message : "Erro ao acessar os produtos.";
+      }
+    }
+
+    if (!listaProdutos.length) {
+      throw new Error(ultimoErro);
+    }
+
+    produtos.value = listaProdutos;
+    gruposCategorias.value = montarGruposCategorias(listaProdutos);
+    selecionarTodasCategorias();
+  } catch (e) {
+    produtos.value = [];
+    gruposCategorias.value = [];
+    limparCategorias();
+
+    erro.value =
+      e instanceof Error ? e.message : "Erro ao carregar categorias.";
+  } finally {
+    carregandoCategorias.value = false;
+  }
+}
+
+async function gerarCatalogo(): Promise<void> {
   carregando.value = true;
   mensagem.value = "";
   erro.value = "";
   downloadUrl.value = "";
 
   try {
+    if (!gruposCategorias.value.length) {
+      throw new Error("Nenhuma categoria foi carregada.");
+    }
+
+    if (!categoriasSelecionadas.value.length) {
+      throw new Error("Selecione pelo menos uma categoria.");
+    }
+
     const atualizarAgio = await fetch(`${API_URL}/agio`, {
       method: "POST",
       headers: {
@@ -67,7 +297,16 @@ async function gerarCatalogo() {
     });
 
     if (!atualizarAgio.ok) {
-      throw new Error("Erro ao atualizar ágio.");
+      const dadosErro = await lerJsonDaResposta(atualizarAgio).catch(() => ({}));
+      const mensagemErro =
+        dadosErro &&
+        typeof dadosErro === "object" &&
+        "erro" in dadosErro &&
+        typeof dadosErro.erro === "string"
+          ? dadosErro.erro
+          : "Erro ao atualizar ágio.";
+
+      throw new Error(mensagemErro);
     }
 
     const resposta = await fetch(`${API_URL}/catalogo`, {
@@ -77,24 +316,38 @@ async function gerarCatalogo() {
       },
       body: JSON.stringify({
         mostrarPrecos: mostrarPrecos.value,
-        vendedorNome: vendedorNome.value,
-        vendedorContato: vendedorContato.value,
-        vendedorInstagram: vendedorInstagram.value,
-        categoriasSelecionadas: categoriasSelecionadas.value
+        vendedorNome: vendedorNome.value.trim(),
+        vendedorContato: vendedorContato.value.trim(),
+        vendedorInstagram: vendedorInstagram.value.trim(),
+
+        // Novos filtros:
+        categoriasPrincipaisSelecionadas:
+          categoriasPrincipaisSelecionadas.value,
+        categoriasSelecionadas: obterCategoriasSelecionadasParaEnvio()
       })
     });
 
-    const dados = await resposta.json();
+    const dados = (await lerJsonDaResposta(resposta)) as {
+      erro?: string;
+      agioPercentual?: number;
+      download?: string;
+    };
 
     if (!resposta.ok) {
       throw new Error(dados.erro || "Erro ao gerar catálogo.");
     }
 
     mensagem.value = mostrarPrecos.value
-      ? `Catálogo gerado com ${dados.agioPercentual}% de ágio.`
+      ? `Catálogo gerado com ${
+          dados.agioPercentual ?? agio.value
+        }% de ágio.`
       : "Catálogo sem preços gerado com sucesso.";
 
-    downloadUrl.value = `${API_URL}${dados.download}`;
+    if (dados.download) {
+      downloadUrl.value = dados.download.startsWith("http")
+        ? dados.download
+        : `${API_URL}${dados.download}`;
+    }
   } catch (e) {
     erro.value = e instanceof Error ? e.message : "Erro inesperado.";
   } finally {
@@ -103,8 +356,7 @@ async function gerarCatalogo() {
 }
 
 onMounted(async () => {
-  await carregarAgio();
-  await carregarCategorias();
+  await Promise.all([carregarAgio(), carregarProdutos()]);
 });
 </script>
 
@@ -128,7 +380,8 @@ onMounted(async () => {
         <h2>Gerar catálogo PDF</h2>
 
         <p class="description">
-          Escolha a porcentagem de ágio, defina se deseja exibir os preços, selecione as categorias e informe os dados do vendedor.
+          Escolha a porcentagem de ágio, defina se deseja exibir os preços,
+          selecione as categorias e informe os dados do vendedor.
         </p>
 
         <div class="form-group">
@@ -148,11 +401,7 @@ onMounted(async () => {
         </div>
 
         <label class="checkbox">
-          <input
-            v-model="mostrarPrecos"
-            type="checkbox"
-          />
-
+          <input v-model="mostrarPrecos" type="checkbox" />
           <span>Mostrar preços no catálogo</span>
         </label>
 
@@ -160,29 +409,78 @@ onMounted(async () => {
           <label>Categorias do catálogo</label>
 
           <div class="category-actions">
-            <button type="button" class="small-button" @click="selecionarTodasCategorias">
+            <button
+              type="button"
+              class="small-button"
+              :disabled="carregandoCategorias || !gruposCategorias.length"
+              @click="selecionarTodasCategorias"
+            >
               Selecionar todas
             </button>
 
-            <button type="button" class="small-button secondary" @click="limparCategorias">
+            <button
+              type="button"
+              class="small-button secondary"
+              :disabled="carregandoCategorias || !categoriasSelecionadas.length"
+              @click="limparCategorias"
+            >
               Limpar
             </button>
           </div>
 
-          <div v-if="categorias.length" class="category-list">
-            <label
-              v-for="categoria in categorias"
-              :key="categoria"
-              class="category-item"
-            >
-              <input
-                v-model="categoriasSelecionadas"
-                type="checkbox"
-                :value="categoria"
-              />
+          <div v-if="carregandoCategorias" class="category-loading">
+            Carregando produtos e categorias...
+          </div>
 
-              <span>{{ categoria }}</span>
-            </label>
+          <div
+            v-else-if="gruposCategorias.length"
+            class="category-groups"
+          >
+            <section
+              v-for="grupo in gruposCategorias"
+              :key="grupo.categoriaPrincipal"
+              class="category-group"
+            >
+              <label class="main-category-item">
+                <input
+                  type="checkbox"
+                  :checked="grupoTotalmenteSelecionado(grupo)"
+                  :indeterminate="grupoParcialmenteSelecionado(grupo)"
+                  @change="
+                    alternarCategoriaPrincipal(
+                      grupo,
+                      ($event.target as HTMLInputElement).checked
+                    )
+                  "
+                />
+
+                <span class="main-category-name">
+                  {{ formatarCategoria(grupo.categoriaPrincipal) }}
+                </span>
+
+                <small>
+                  {{ grupo.categorias.length }}
+                  {{ grupo.categorias.length === 1 ? "categoria" : "categorias" }}
+                </small>
+              </label>
+
+              <div class="subcategory-list">
+                <label
+                  v-for="categoria in grupo.categorias"
+                  :key="chaveCategoria(grupo.categoriaPrincipal, categoria)"
+                  class="subcategory-item"
+                >
+                  <input
+                    v-model="categoriasSelecionadas"
+                    type="checkbox"
+                    :value="chaveCategoria(grupo.categoriaPrincipal, categoria)"
+                    @change="atualizarSubcategoria"
+                  />
+
+                  <span>{{ formatarCategoria(categoria) }}</span>
+                </label>
+              </div>
+            </section>
           </div>
 
           <p v-else class="category-empty">
@@ -216,23 +514,25 @@ onMounted(async () => {
             v-model="vendedorInstagram"
             class="text-input"
             type="text"
-            placeholder="Ex: zé@fbg.com"
+            placeholder="Ex: ze@fbg.com"
           />
         </div>
 
         <button
           class="primary"
+          :disabled="
+            carregando ||
+            carregandoCategorias ||
+            !categoriasSelecionadas.length
+          "
           @click="gerarCatalogo"
-          :disabled="carregando"
         >
           <span v-if="carregando" class="loading-content">
             <span class="tool-loader">🔧</span>
             GERANDO CATÁLOGO...
           </span>
 
-          <span v-else>
-            GERAR CATÁLOGO
-          </span>
+          <span v-else>GERAR CATÁLOGO</span>
         </button>
 
         <div v-if="carregando" class="loading-box">
@@ -259,6 +559,7 @@ onMounted(async () => {
           :href="downloadUrl"
           class="download"
           target="_blank"
+          rel="noopener noreferrer"
         >
           BAIXAR CATÁLOGO PDF
         </a>
@@ -268,6 +569,10 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+* {
+  box-sizing: border-box;
+}
+
 .page {
   min-height: 100vh;
   background: #f5f5f5;
@@ -323,7 +628,7 @@ onMounted(async () => {
 }
 
 .panel {
-  max-width: 480px;
+  max-width: 560px;
   margin: 0 auto;
   background: #fff;
   border-radius: 10px;
@@ -362,7 +667,7 @@ h2 {
   margin-bottom: 18px;
 }
 
-.form-group label {
+.form-group > label {
   display: block;
   font-weight: 800;
   text-transform: uppercase;
@@ -376,11 +681,12 @@ h2 {
   border: 2px solid #111;
   border-radius: 8px;
   overflow: hidden;
-  background: white;
+  background: #fff;
 }
 
 .input-wrap input {
   flex: 1;
+  min-width: 0;
   border: 0;
   padding: 15px;
   font-size: 22px;
@@ -406,24 +712,10 @@ h2 {
   outline: none;
 }
 
-.category-list {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px 16px;
-  margin-top: 12px;
-}
-
-.category-item {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  min-width: 0;
-}
-
-.category-item span {
-  font-size: 7px;
-  overflow-wrap: break-word;
-  word-break: break-word;
+.text-input:focus,
+.input-wrap:focus-within {
+  border-color: #d4aa00;
+  box-shadow: 0 0 0 3px rgba(246, 196, 0, 0.18);
 }
 
 .checkbox {
@@ -440,6 +732,140 @@ h2 {
   width: 18px;
   height: 18px;
   cursor: pointer;
+}
+
+.category-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.small-button {
+  border: 0;
+  border-radius: 6px;
+  background: #111;
+  color: #f6c400;
+  padding: 9px 12px;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.small-button.secondary {
+  background: #e7e7e7;
+  color: #222;
+}
+
+.small-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.category-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-height: 500px;
+  overflow-y: auto;
+  padding: 2px 5px 2px 2px;
+}
+
+.category-group {
+  border: 1px solid #d7d7d7;
+  border-radius: 9px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.main-category-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0;
+  padding: 12px;
+  background: #111;
+  color: #f6c400;
+  cursor: pointer;
+}
+
+.main-category-item input {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.main-category-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.3;
+  font-weight: 900;
+  text-transform: uppercase;
+  overflow-wrap: anywhere;
+}
+
+.main-category-item small {
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.subcategory-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px 14px;
+  padding: 13px;
+  background: #fafafa;
+}
+
+.subcategory-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  min-width: 0;
+  margin: 0;
+  cursor: pointer;
+}
+
+.subcategory-item input {
+  width: 16px;
+  height: 16px;
+  margin-top: 1px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.subcategory-item span {
+  font-size: 10px;
+  line-height: 1.35;
+  font-weight: 700;
+  text-transform: uppercase;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.category-loading,
+.category-empty {
+  padding: 13px;
+  border-radius: 8px;
+  font-size: 13px;
+  text-align: center;
+}
+
+.category-loading {
+  background: #f7f7f7;
+  border: 1px dashed #aaa;
+  color: #444;
+}
+
+.category-empty {
+  background: #fff8d6;
+  border: 1px solid #f6c400;
+  color: #6b5700;
 }
 
 .primary {
@@ -563,17 +989,14 @@ h2 {
 }
 
 @keyframes bounceTool {
-  0%, 100% {
+  0%,
+  100% {
     transform: translateY(0) rotate(0deg);
   }
 
   50% {
     transform: translateY(-8px) rotate(-12deg);
   }
-}
-
-* {
-  box-sizing: border-box;
 }
 
 @media (max-width: 768px) {
@@ -629,7 +1052,6 @@ h2 {
   }
 
   .input-wrap input {
-    min-width: 0;
     font-size: 20px;
     padding: 13px;
   }
@@ -637,6 +1059,19 @@ h2 {
   .input-wrap span {
     padding: 14px 16px;
     font-size: 18px;
+  }
+
+  .subcategory-list {
+    grid-template-columns: 1fr;
+  }
+
+  .main-category-item {
+    align-items: flex-start;
+  }
+
+  .main-category-item small {
+    white-space: normal;
+    text-align: right;
   }
 
   .primary,
@@ -701,7 +1136,7 @@ h2 {
     font-size: 13px;
   }
 
-  .form-group label {
+  .form-group > label {
     font-size: 12px;
   }
 
@@ -715,6 +1150,26 @@ h2 {
     padding: 13px 14px;
   }
 
+  .main-category-item {
+    padding: 10px;
+  }
+
+  .main-category-name {
+    font-size: 11px;
+  }
+
+  .main-category-item small {
+    font-size: 9px;
+  }
+
+  .subcategory-list {
+    padding: 11px;
+  }
+
+  .subcategory-item span {
+    font-size: 9px;
+  }
+
   .primary,
   .download {
     font-size: 13px;
@@ -726,25 +1181,10 @@ h2 {
     font-size: 13px;
     padding: 10px;
   }
-
-  
-}
-
-@media (max-width: 1024px) {
-  .category-list {
-    grid-template-columns: repeat(3, 1fr);
-  }
-}
-
-@media (max-width: 768px) {
-  .category-list {
-    grid-template-columns: repeat(2, 1fr);
-  }
-}
-
-@media (max-width: 420px) {
-  .category-list {
-    grid-template-columns: 1fr;
-  }
 }
 </style>
+'''
+
+out = Path("/mnt/data/App.vue")
+out.write_text(src, encoding="utf-8")
+print(out)
