@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 
-const API_URL = "https://environment-companies-phi-finance.trycloudflare.com";
+const API_URL = "http://localhost:3000";
 
 type Produto = {
   codigo?: string;
@@ -13,11 +13,6 @@ type Produto = {
   categoria?: string;
 };
 
-type GrupoCategoria = {
-  categoriaPrincipal: string;
-  categorias: string[];
-};
-
 const agio = ref<number>(30);
 const mostrarPrecos = ref(true);
 
@@ -26,9 +21,8 @@ const vendedorContato = ref("");
 const vendedorInstagram = ref("");
 
 const produtos = ref<Produto[]>([]);
-const gruposCategorias = ref<GrupoCategoria[]>([]);
+const categoriasPrincipais = ref<string[]>([]);
 const categoriasPrincipaisSelecionadas = ref<string[]>([]);
-const categoriasSelecionadas = ref<string[]>([]);
 
 const carregandoCategorias = ref(false);
 const carregando = ref(false);
@@ -36,20 +30,11 @@ const mensagem = ref("");
 const erro = ref("");
 const downloadUrl = ref("");
 
-function normalizarTexto(valor?: string, fallback = ""): string {
-  const texto = String(valor ?? "").trim();
-  return texto || fallback;
-}
-
 function formatarCategoria(valor: string): string {
   return valor
     .replace(/[-_]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
-}
-
-function chaveCategoria(categoriaPrincipal: string, categoria: string): string {
-  return `${categoriaPrincipal}|||${categoria}`;
 }
 
 function extrairProdutos(dados: unknown): Produto[] {
@@ -72,82 +57,14 @@ function extrairProdutos(dados: unknown): Produto[] {
   return [];
 }
 
-
-function categoriasDoGrupo(grupo: GrupoCategoria): string[] {
-  return grupo.categorias.map((categoria) =>
-    chaveCategoria(grupo.categoriaPrincipal, categoria)
-  );
-}
-
-function grupoTotalmenteSelecionado(grupo: GrupoCategoria): boolean {
-  const chaves = categoriasDoGrupo(grupo);
-
-  return (
-    chaves.length > 0 &&
-    chaves.every((chave) => categoriasSelecionadas.value.includes(chave))
-  );
-}
-
-function grupoParcialmenteSelecionado(grupo: GrupoCategoria): boolean {
-  const chaves = categoriasDoGrupo(grupo);
-  const quantidadeSelecionada = chaves.filter((chave) =>
-    categoriasSelecionadas.value.includes(chave)
-  ).length;
-
-  return quantidadeSelecionada > 0 && quantidadeSelecionada < chaves.length;
-}
-
-function atualizarCategoriasPrincipaisSelecionadas(): void {
-  categoriasPrincipaisSelecionadas.value = gruposCategorias.value
-    .filter((grupo) => grupoTotalmenteSelecionado(grupo))
-    .map((grupo) => grupo.categoriaPrincipal);
-}
-
-function alternarCategoriaPrincipal(
-  grupo: GrupoCategoria,
-  selecionada: boolean
-): void {
-  const chavesDoGrupo = categoriasDoGrupo(grupo);
-
-  if (selecionada) {
-    categoriasSelecionadas.value = Array.from(
-      new Set([...categoriasSelecionadas.value, ...chavesDoGrupo])
-    );
-  } else {
-    categoriasSelecionadas.value = categoriasSelecionadas.value.filter(
-      (chave) => !chavesDoGrupo.includes(chave)
-    );
-  }
-
-  atualizarCategoriasPrincipaisSelecionadas();
-}
-
-function atualizarSubcategoria(): void {
-  atualizarCategoriasPrincipaisSelecionadas();
-}
-
 function selecionarTodasCategorias(): void {
-  categoriasSelecionadas.value = gruposCategorias.value.flatMap((grupo) =>
-    categoriasDoGrupo(grupo)
-  );
-
-  atualizarCategoriasPrincipaisSelecionadas();
+  categoriasPrincipaisSelecionadas.value = [
+    ...categoriasPrincipais.value
+  ];
 }
 
 function limparCategorias(): void {
   categoriasPrincipaisSelecionadas.value = [];
-  categoriasSelecionadas.value = [];
-}
-
-function obterCategoriasSelecionadasParaEnvio(): string[] {
-  return Array.from(
-    new Set(
-      categoriasSelecionadas.value.map((chave) => {
-        const separador = chave.indexOf("|||");
-        return separador >= 0 ? chave.slice(separador + 3) : chave;
-      })
-    )
-  );
 }
 
 async function lerJsonDaResposta(resposta: Response): Promise<unknown> {
@@ -187,304 +104,66 @@ async function carregarAgio(): Promise<void> {
 
 async function carregarProdutos(): Promise<void> {
   carregandoCategorias.value = true;
+  erro.value = "";
 
   try {
-    erro.value = "";
-
-    const rotas = [
-      `${API_URL}/produtos`,
-      `${API_URL}/produtos.json`,
-      `${API_URL}/produtos/categorias`
-    ];
-
-    /*
-     * Não para mais na primeira rota.
-     * Junta todas as categorias encontradas nas três respostas.
-     */
-    const agrupamento = new Map<string, Set<string>>();
-    let encontrouAlgumaCategoria = false;
-    const errosRotas: string[] = [];
-
-    function adicionarCategoria(
-      categoriaPrincipalRecebida?: string,
-      categoriaRecebida?: string
-    ): void {
-      const categoriaPrincipal = normalizarTexto(
-        categoriaPrincipalRecebida,
-        "CATEGORIAS"
-      );
-
-      const categoria = normalizarTexto(categoriaRecebida);
-
-      if (!categoria) {
-        return;
+    const resposta = await fetch(
+      `${API_URL}/produtos?t=${Date.now()}`,
+      {
+        cache: "no-store"
       }
+    );
 
-      if (!agrupamento.has(categoriaPrincipal)) {
-        agrupamento.set(categoriaPrincipal, new Set<string>());
-      }
-
-      agrupamento.get(categoriaPrincipal)?.add(categoria);
-      encontrouAlgumaCategoria = true;
-    }
-
-    for (const rota of rotas) {
-      try {
-        const separador = rota.includes("?") ? "&" : "?";
-
-        const resposta = await fetch(
-          `${rota}${separador}t=${Date.now()}`,
-          {
-            cache: "no-store"
-          }
-        );
-
-        if (!resposta.ok) {
-          errosRotas.push(`${rota}: status ${resposta.status}`);
-          continue;
-        }
-
-        const dados = await lerJsonDaResposta(resposta);
-
-        /*
-         * FORMATO 1:
-         * Array de produtos ou { produtos: [...] } / { data: [...] }
-         */
-        const listaProdutos = extrairProdutos(dados);
-
-        for (const produto of listaProdutos) {
-          const categoriaPrincipal = normalizarTexto(
-            produto.categoriaPrincipal
-          );
-
-          const categoria = normalizarTexto(produto.categoria);
-
-          /*
-           * Se tiver os dois campos, agrupa normalmente.
-           */
-          if (categoriaPrincipal && categoria) {
-            adicionarCategoria(categoriaPrincipal, categoria);
-            continue;
-          }
-
-          /*
-           * Se tiver apenas categoriaPrincipal, ela também aparece
-           * como opção selecionável.
-           */
-          if (categoriaPrincipal && !categoria) {
-            adicionarCategoria(
-              "CATEGORIAS-PRINCIPAIS",
-              categoriaPrincipal
-            );
-            continue;
-          }
-
-          /*
-           * Se tiver apenas categoria, mantém compatibilidade
-           * com o JSON antigo.
-           */
-          if (!categoriaPrincipal && categoria) {
-            adicionarCategoria("CATEGORIAS", categoria);
-          }
-        }
-
-        /*
-         * FORMATO 2:
-         * { categorias: [...] }
-         */
-        if (
-          dados &&
-          typeof dados === "object" &&
-          "categorias" in dados
-        ) {
-          const categoriasRecebidas = (
-            dados as { categorias?: unknown }
-          ).categorias;
-
-          if (Array.isArray(categoriasRecebidas)) {
-            for (const item of categoriasRecebidas) {
-              /*
-               * Backend antigo:
-               * categorias: ["A", "B", "C"]
-               */
-              if (typeof item === "string") {
-                adicionarCategoria("CATEGORIAS", item);
-                continue;
-              }
-
-              if (!item || typeof item !== "object") {
-                continue;
-              }
-
-              const objeto = item as {
-                categoriaPrincipal?: unknown;
-                categoria?: unknown;
-                categorias?: unknown;
-                subcategorias?: unknown;
-              };
-
-              const categoriaPrincipal =
-                typeof objeto.categoriaPrincipal === "string"
-                  ? objeto.categoriaPrincipal
-                  : "";
-
-              /*
-               * Formato:
-               * { categoriaPrincipal, categoria }
-               */
-              if (typeof objeto.categoria === "string") {
-                adicionarCategoria(
-                  categoriaPrincipal || "CATEGORIAS",
-                  objeto.categoria
-                );
-              }
-
-              /*
-               * Formato:
-               * { categoriaPrincipal, categorias: [] }
-               */
-              if (Array.isArray(objeto.categorias)) {
-                for (const categoria of objeto.categorias) {
-                  if (typeof categoria === "string") {
-                    adicionarCategoria(
-                      categoriaPrincipal || "CATEGORIAS",
-                      categoria
-                    );
-                  }
-                }
-              }
-
-              /*
-               * Também aceita:
-               * { categoriaPrincipal, subcategorias: [] }
-               */
-              if (Array.isArray(objeto.subcategorias)) {
-                for (const categoria of objeto.subcategorias) {
-                  if (typeof categoria === "string") {
-                    adicionarCategoria(
-                      categoriaPrincipal || "CATEGORIAS",
-                      categoria
-                    );
-                  }
-                }
-              }
-
-              /*
-               * Se vier apenas categoriaPrincipal, sem subcategorias,
-               * ela ainda aparece como opção.
-               */
-              const semCategorias =
-                !Array.isArray(objeto.categorias) ||
-                objeto.categorias.length === 0;
-
-              const semSubcategorias =
-                !Array.isArray(objeto.subcategorias) ||
-                objeto.subcategorias.length === 0;
-
-              const semCategoria =
-                typeof objeto.categoria !== "string" ||
-                !objeto.categoria.trim();
-
-              if (
-                categoriaPrincipal &&
-                semCategorias &&
-                semSubcategorias &&
-                semCategoria
-              ) {
-                adicionarCategoria(
-                  "CATEGORIAS-PRINCIPAIS",
-                  categoriaPrincipal
-                );
-              }
-            }
-          }
-        }
-
-        /*
-         * FORMATO 3:
-         * { categoriasPrincipais: [...] }
-         */
-        if (
-          dados &&
-          typeof dados === "object" &&
-          "categoriasPrincipais" in dados
-        ) {
-          const principais = (
-            dados as { categoriasPrincipais?: unknown }
-          ).categoriasPrincipais;
-
-          if (Array.isArray(principais)) {
-            for (const categoriaPrincipal of principais) {
-              if (typeof categoriaPrincipal === "string") {
-                adicionarCategoria(
-                  "CATEGORIAS-PRINCIPAIS",
-                  categoriaPrincipal
-                );
-              }
-            }
-          }
-        }
-      } catch (e) {
-        errosRotas.push(
-          `${rota}: ${
-            e instanceof Error ? e.message : "erro desconhecido"
-          }`
-        );
-      }
-    }
-
-    if (!encontrouAlgumaCategoria) {
+    if (!resposta.ok) {
       throw new Error(
-        errosRotas.length
-          ? `Nenhuma categoria encontrada. ${errosRotas.join(" | ")}`
-          : "Nenhuma categoria encontrada."
+        `Erro ao carregar produtos. Status ${resposta.status}.`
       );
     }
 
-    gruposCategorias.value = Array.from(agrupamento.entries())
-      .map(([categoriaPrincipal, categorias]) => ({
-        categoriaPrincipal,
-        categorias: Array.from(categorias).sort((a, b) =>
-          a.localeCompare(b, "pt-BR", {
-            sensitivity: "base"
-          })
-        )
-      }))
-      .filter((grupo) => grupo.categorias.length > 0)
-      .sort((a, b) =>
-        a.categoriaPrincipal.localeCompare(
-          b.categoriaPrincipal,
-          "pt-BR",
-          {
-            sensitivity: "base"
-          }
-        )
-      );
+    const dados = await lerJsonDaResposta(resposta);
+    const listaProdutos = extrairProdutos(dados);
 
-    produtos.value = [];
+    if (!listaProdutos.length) {
+      throw new Error("A rota /produtos não retornou produtos.");
+    }
+
+    produtos.value = listaProdutos;
+
+    categoriasPrincipais.value = Array.from(
+      new Set(
+        listaProdutos
+          .map((produto) =>
+            String(produto.categoriaPrincipal ?? "").trim()
+          )
+          .filter((categoriaPrincipal) => categoriaPrincipal.length > 0)
+      )
+    ).sort((a, b) =>
+      a.localeCompare(b, "pt-BR", {
+        sensitivity: "base"
+      })
+    );
+
+    if (!categoriasPrincipais.value.length) {
+      throw new Error(
+        "Nenhuma categoriaPrincipal foi encontrada nos produtos."
+      );
+    }
+
     selecionarTodasCategorias();
 
     console.log(
-      "Total de opções no seletor:",
-      gruposCategorias.value.reduce(
-        (total, grupo) => total + grupo.categorias.length,
-        0
-      )
-    );
-
-    console.log(
-      "Categorias carregadas:",
-      gruposCategorias.value
+      "Categorias principais encontradas:",
+      categoriasPrincipais.value
     );
   } catch (e) {
     produtos.value = [];
-    gruposCategorias.value = [];
-    limparCategorias();
+    categoriasPrincipais.value = [];
+    categoriasPrincipaisSelecionadas.value = [];
 
     erro.value =
       e instanceof Error
         ? e.message
-        : "Erro ao carregar categorias.";
+        : "Erro ao carregar categorias principais.";
   } finally {
     carregandoCategorias.value = false;
   }
@@ -497,12 +176,12 @@ async function gerarCatalogo(): Promise<void> {
   downloadUrl.value = "";
 
   try {
-    if (!gruposCategorias.value.length) {
-      throw new Error("Nenhuma categoria foi carregada.");
+    if (!categoriasPrincipais.value.length) {
+      throw new Error("Nenhuma categoria principal foi carregada.");
     }
 
-    if (!categoriasSelecionadas.value.length) {
-      throw new Error("Selecione pelo menos uma categoria.");
+    if (!categoriasPrincipaisSelecionadas.value.length) {
+      throw new Error("Selecione pelo menos uma categoria principal.");
     }
 
     const atualizarAgio = await fetch(`${API_URL}/agio`, {
@@ -516,7 +195,10 @@ async function gerarCatalogo(): Promise<void> {
     });
 
     if (!atualizarAgio.ok) {
-      const dadosErro = await lerJsonDaResposta(atualizarAgio).catch(() => ({}));
+      const dadosErro = await lerJsonDaResposta(atualizarAgio).catch(
+        () => ({})
+      );
+
       const mensagemErro =
         dadosErro &&
         typeof dadosErro === "object" &&
@@ -538,11 +220,8 @@ async function gerarCatalogo(): Promise<void> {
         vendedorNome: vendedorNome.value.trim(),
         vendedorContato: vendedorContato.value.trim(),
         vendedorInstagram: vendedorInstagram.value.trim(),
-
-        // Novos filtros:
         categoriasPrincipaisSelecionadas:
-          categoriasPrincipaisSelecionadas.value,
-        categoriasSelecionadas: obterCategoriasSelecionadasParaEnvio()
+          categoriasPrincipaisSelecionadas.value
       })
     });
 
@@ -600,7 +279,7 @@ onMounted(async () => {
 
         <p class="description">
           Escolha a porcentagem de ágio, defina se deseja exibir os preços,
-          selecione as categorias e informe os dados do vendedor.
+          selecione as categorias principais e informe os dados do vendedor.
         </p>
 
         <div class="form-group">
@@ -625,13 +304,13 @@ onMounted(async () => {
         </label>
 
         <div class="form-group">
-          <label>Categorias do catálogo</label>
+          <label>Categorias principais do catálogo</label>
 
           <div class="category-actions">
             <button
               type="button"
               class="small-button"
-              :disabled="carregandoCategorias || !gruposCategorias.length"
+              :disabled="carregandoCategorias || !categoriasPrincipais.length"
               @click="selecionarTodasCategorias"
             >
               Selecionar todas
@@ -640,7 +319,10 @@ onMounted(async () => {
             <button
               type="button"
               class="small-button secondary"
-              :disabled="carregandoCategorias || !categoriasSelecionadas.length"
+              :disabled="
+                carregandoCategorias ||
+                !categoriasPrincipaisSelecionadas.length
+              "
               @click="limparCategorias"
             >
               Limpar
@@ -648,62 +330,30 @@ onMounted(async () => {
           </div>
 
           <div v-if="carregandoCategorias" class="category-loading">
-            Carregando produtos e categorias...
+            Carregando produtos e categorias principais...
           </div>
 
           <div
-            v-else-if="gruposCategorias.length"
-            class="category-groups"
+            v-else-if="categoriasPrincipais.length"
+            class="main-category-list"
           >
-            <section
-              v-for="grupo in gruposCategorias"
-              :key="grupo.categoriaPrincipal"
-              class="category-group"
+            <label
+              v-for="categoriaPrincipal in categoriasPrincipais"
+              :key="categoriaPrincipal"
+              class="main-category-option"
             >
-              <label class="main-category-item">
-                <input
-                  type="checkbox"
-                  :checked="grupoTotalmenteSelecionado(grupo)"
-                  :indeterminate="grupoParcialmenteSelecionado(grupo)"
-                  @change="
-                    alternarCategoriaPrincipal(
-                      grupo,
-                      ($event.target as HTMLInputElement).checked
-                    )
-                  "
-                />
+              <input
+                v-model="categoriasPrincipaisSelecionadas"
+                type="checkbox"
+                :value="categoriaPrincipal"
+              />
 
-                <span class="main-category-name">
-                  {{ formatarCategoria(grupo.categoriaPrincipal) }}
-                </span>
-
-                <small>
-                  {{ grupo.categorias.length }}
-                  {{ grupo.categorias.length === 1 ? "categoria" : "categorias" }}
-                </small>
-              </label>
-
-              <div class="subcategory-list">
-                <label
-                  v-for="categoria in grupo.categorias"
-                  :key="chaveCategoria(grupo.categoriaPrincipal, categoria)"
-                  class="subcategory-item"
-                >
-                  <input
-                    v-model="categoriasSelecionadas"
-                    type="checkbox"
-                    :value="chaveCategoria(grupo.categoriaPrincipal, categoria)"
-                    @change="atualizarSubcategoria"
-                  />
-
-                  <span>{{ formatarCategoria(categoria) }}</span>
-                </label>
-              </div>
-            </section>
+              <span>{{ formatarCategoria(categoriaPrincipal) }}</span>
+            </label>
           </div>
 
           <p v-else class="category-empty">
-            Nenhuma categoria encontrada. Execute o scraper primeiro.
+            Nenhuma categoria principal encontrada. Execute o scraper primeiro.
           </p>
         </div>
 
@@ -742,7 +392,7 @@ onMounted(async () => {
           :disabled="
             carregando ||
             carregandoCategorias ||
-            !categoriasSelecionadas.length
+            !categoriasPrincipaisSelecionadas.length
           "
           @click="gerarCatalogo"
         >
@@ -1216,6 +866,42 @@ h2 {
   }
 }
 
+
+.main-category-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 14px;
+  padding: 14px;
+  background: #fafafa;
+  border: 1px solid #d7d7d7;
+  border-radius: 9px;
+}
+
+.main-category-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  cursor: pointer;
+}
+
+.main-category-option input {
+  width: 17px;
+  height: 17px;
+  margin: 0;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.main-category-option span {
+  font-size: 11px;
+  line-height: 1.35;
+  font-weight: 800;
+  text-transform: uppercase;
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 768px) {
   .topbar {
     padding: 14px 16px;
@@ -1279,6 +965,10 @@ h2 {
   }
 
   .subcategory-list {
+    grid-template-columns: 1fr;
+  }
+
+  .main-category-list {
     grid-template-columns: 1fr;
   }
 
