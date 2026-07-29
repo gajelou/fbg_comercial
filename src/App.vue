@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 
-const API_URL = "http://187.127.47.66:3002";
+const API_URL = "https://187.127.47.66/comercial";
 
 type Produto = {
   codigo?: string;
